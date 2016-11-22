@@ -1,0 +1,11 @@
+[package]
+name = "reckon"
+version = "0.1.0"
+authors = ["Ari <a@silversupre.me>"]
+
+description = "libexpect-alike for Rust."
+repository = "github.com/silversupreme/reckon"
+license = "CC0-1.0"
+
+[dependencies]
+regex = "0.1"

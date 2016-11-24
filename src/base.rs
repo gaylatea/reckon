@@ -5,7 +5,7 @@
 //! version of "expect" I've yet seen aside from some Bash scripts.
 use std::result::Result;
 use std::process::{Command, Stdio, Child};
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::io::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -26,18 +26,15 @@ impl Process {
     ///
     /// ```rust
     /// # use reckon::base::Process;
-    /// Process::new("true", vec![]);
+    /// Process::new("true", vec![]).expect("Your UNIX is broken.");
     /// ```
     ///
     /// Processes that cannot be invoked will denote this in a way that
     /// can be handled properly:
     ///
-    /// ```rust
+    /// ```rust,should_panic
     /// # use reckon::base::Process;
-    /// match Process::new("nope-i-don't-exist", vec![]) {
-    ///     Ok(_)  => panic!("This really should never happen."),
-    ///     Err(_) => println!("This is expected."),
-    /// }
+    /// Process::new("nope-i-don't-exist", vec![]).expect("This should fail.");
     /// ```
     pub fn new(exe: &str, args: Vec<&str>) -> Result<Process, Error> {
         let command = Command::new(exe)
@@ -58,6 +55,18 @@ impl Process {
     /// This doesn't do any special processing of the data; it just shovels it
     /// onto the subprocess as fast as it can, and propagates any errors that
     /// occurred during this operation.
+    ///
+    /// Of note is the fact that `reckon` assumes that strings are being sent
+    /// betwixt processes; future support for raw bytes might come if needed.
+    ///
+    /// ```rust
+    /// # use reckon::base::Process;
+    /// # use std::time::Duration;
+    /// let mut p = Process::new("cat", vec![]).unwrap();
+    /// p.emit("Hello");
+    /// # let (m, _) = p.expect(vec!["Hello"], Duration::from_secs(1)).unwrap();
+    /// # assert_eq!(m, 0);
+    /// ```
     pub fn emit(&mut self, data: &str) -> Result<(), Error> {
         let mut stdin = self.child.stdin.as_mut().unwrap();
         stdin.write_all(data.as_bytes())
@@ -74,8 +83,24 @@ impl Process {
     /// callers, without having to keep a buffer around after the call.
     ///
     /// # Examples
-    /// TODO(silversupreme): Fill this in.
-    pub fn expect(&mut self, needles: Vec<&str>, timeout: Duration) -> (usize, String) {
+    ///
+    /// ```rust
+    /// # use reckon::base::Process;
+    /// # use std::time::Duration;
+    /// let mut p = Process::new("bash", vec!["test.sh"]).unwrap();
+    /// let (m, _) = p.expect(vec!["Hello"], Duration::from_secs(1)).unwrap();
+    /// # assert_eq!(m, 0);
+    /// ```
+    ///
+    /// The matcher supports timeouts, as well:
+    ///
+    /// ```rust,should_panic
+    /// # use reckon::base::Process;
+    /// # use std::time::Duration;
+    /// # let mut p = Process::new("bash", vec!["test.sh"]).unwrap();
+    /// p.expect(vec!["Hello"], Duration::from_secs(0)).unwrap();
+    /// ```
+    pub fn expect(&mut self, needles: Vec<&str>, timeout: Duration) -> Result<(usize, String), Error> {
         let start_time = Instant::now();
 
         let stdout = self.child.stdout.as_mut().unwrap();
@@ -92,11 +117,11 @@ impl Process {
             b.push(c.next().unwrap().unwrap());
 
             for n in rs.matches(&b).into_iter() {
-                return (n, b);
+                return Ok((n, b));
             }
         }
 
-        return (0, String::from(""));
+        return Err(Error::new(ErrorKind::TimedOut, ""));
     }
 }
 

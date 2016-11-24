@@ -61,7 +61,7 @@ impl Process {
     /// # use reckon::base::Process;
     /// # use std::time::Duration;
     /// let mut p = Process::new("cat", vec![]).unwrap();
-    /// p.emit("Hello");
+    /// p.emit("Hello\n");
     /// # let (m, _) = p.expect(vec!["Hello"], Duration::from_secs(1)).unwrap();
     /// # assert_eq!(m, 0);
     /// ```
@@ -95,7 +95,51 @@ impl Process {
     /// # use reckon::base::Process;
     /// # use std::time::Duration;
     /// # let mut p = Process::new("bash", vec!["test.sh"]).unwrap();
-    /// p.expect(vec!["Hello"], Duration::from_secs(0)).unwrap();
+    /// # p.expect(vec![r"!"], Duration::from_secs(1)).unwrap();
+    /// p.emit("nope\n");
+    /// p.expect(vec![r"!"], Duration::from_secs(1)).expect("This should fail.");
+    /// ```
+    ///
+    /// By chaining this and [emit](#method.emit), you can build complex interactions with
+    /// subprocesses:
+    ///
+    /// ```rust
+    /// # use reckon::base::{Process, Duration};
+    /// # let mut p = Process::new("bash", vec!["test.sh"]).unwrap();
+    /// # p.expect(vec!["!"], Duration::from_secs(2)).unwrap();
+    /// p.emit("test\n").unwrap();
+    /// p.expect(vec!["test script"], Duration::from_secs(1)).unwrap();
+    /// ```
+    ///
+    /// Note the need to explicitly wait for the `test.sh` prompt again - this is because
+    /// reckon literally reads all data that comes from the program, and skips nothing.
+    /// This is somewhat of a departure from how programs like pexpect work, given that they
+    /// feed a buffer continuously from a background thread, and match/clear that for expect()
+    /// calls.
+    ///
+    /// ```rust
+    /// # use reckon::base::{Process, Duration};
+    /// # let mut p = Process::new("bash", vec!["test.sh"]).unwrap();
+    /// # p.expect(vec!["!"], Duration::from_secs(2)).unwrap();
+    /// # p.emit("test\n").unwrap();
+    /// # p.expect(vec!["test script"], Duration::from_secs(1)).unwrap();
+    /// p.expect(vec!["!"], Duration::from_secs(1)).unwrap();
+    /// p.emit("commit synchronize\n").unwrap();
+    /// ```
+    ///
+    /// // Multiple matches are possible, and when this happens, the first one to match will
+    /// // be returned, and the input stream will be stopped.
+    ///
+    /// ```rust
+    /// # use reckon::base::{Process, Duration};
+    /// # let mut p = Process::new("bash", vec!["test.sh"]).unwrap();
+    /// # p.expect(vec!["!"], Duration::from_secs(2)).unwrap();
+    /// # p.emit("test\n").unwrap();
+    /// # p.expect(vec!["test script"], Duration::from_secs(1)).unwrap();
+    /// # p.expect(vec!["!"], Duration::from_secs(1)).unwrap();
+    /// # p.emit("commit synchronize\n").unwrap();
+    /// let (m, _) = p.expect(vec!["!", "no route to re1"], Duration::from_secs(1)).unwrap();
+    /// assert_eq!(m, 1);
     /// ```
     pub fn expect(&mut self,
                   needles: Vec<&str>,
@@ -114,14 +158,21 @@ impl Process {
                 break;
             }
 
-            b.push(c.next().unwrap().unwrap());
+            // Skip any UTF-8 decoding errors in the stream.
+            match c.next() {
+                Some(ch) => match ch {
+                    Ok(p) => b.push(p),
+                    Err(_) => continue,
+                },
+                None => continue,
+            }
 
             for n in rs.matches(&b).into_iter() {
                 return Ok((n, b));
             }
         }
 
-        return Err(Error::new(ErrorKind::TimedOut, ""));
+        return Err(Error::new(ErrorKind::TimedOut, b));
     }
 }
 
@@ -131,6 +182,6 @@ impl Drop for Process {
     /// This prevents the child process sticking around when the parent dies, which apparently can
     /// happen when you capture all `std{io,err,out}` pipes.
     fn drop(&mut self) {
-        self.child.wait().expect("could not kill the process!");
+        self.child.kill().expect("could not kill the process!");
     }
 }

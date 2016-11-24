@@ -5,7 +5,7 @@
 //! network devices. Screen scraping isn't the most fault-tolerant way of
 //! interacting with these devices, but damned if it isn't the most mature
 //! and battle-tested, and it requires little-to-no infrastructure.
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 #![feature(io)]
 
 extern crate regex;
